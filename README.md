@@ -19,7 +19,7 @@ Demiurge combines four components:
 
 The method targets coherent spatiotemporal scene construction across dense multi-view trajectories, large-parallax rendering, and geometry-faithful outputs suitable for downstream 3D reconstruction. This repository provides the **inference workflow**: warping, RGB/depth generation, optional refinement, alignment, and autoregressive reuse of earlier results. It does not currently provide an end-to-end training recipe or a 3D Gaussian Splatting optimization pipeline.
 
-> **Code and weights:** this repository contains inference code; the three fine-tuned checkpoints are publicly available at [ingzzzz/Demiurge on Hugging Face](https://huggingface.co/ingzzzz/Demiurge). No login or access request is required to download these checkpoints. Upstream base models are still required and may have separate access conditions. See [Demiurge checkpoints](#demiurge-checkpoints) for download and configuration instructions.
+> **Code and weights:** this repository contains inference code; the three fine-tuned checkpoints are publicly available at [ingzzzz/Demiurge](https://huggingface.co/ingzzzz/Demiurge). No login or access request is required to download these checkpoints. Upstream base models are still required and may have separate access conditions. See [Demiurge checkpoints](#demiurge-checkpoints) for download and configuration instructions.
 
 ## Quick Start
 
