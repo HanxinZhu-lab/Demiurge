@@ -1,0 +1,139 @@
+# Modified for Demiurge; see THIRD_PARTY_NOTICES.md.
+import os, torch
+from tqdm import tqdm
+from accelerate import Accelerator
+from .training_module import DiffusionTrainingModule
+from .logger import ModelLogger
+
+
+def launch_training_task(
+    accelerator: Accelerator,
+    dataset: torch.utils.data.Dataset,
+    model: DiffusionTrainingModule,
+    model_logger: ModelLogger,
+    learning_rate: float = 1e-5,
+    weight_decay: float = 1e-2,
+    num_workers: int = 1,
+    save_steps: int = None,
+    num_epochs: int = 1,
+    args = None,
+):
+    if args is not None:
+        learning_rate = args.learning_rate
+        weight_decay = args.weight_decay
+        num_workers = args.dataset_num_workers
+        save_steps = args.save_steps
+        num_epochs = args.num_epochs
+    
+    optimizer = torch.optim.AdamW(
+        model.trainable_modules(),
+        lr=learning_rate,
+        weight_decay=weight_decay
+    )
+
+    dataloader = torch.utils.data.DataLoader(
+        dataset,
+        shuffle=True,
+        collate_fn=lambda x: x[0],
+        num_workers=num_workers
+    )
+
+    num_training_steps = len(dataloader) * num_epochs // 4
+
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer,
+        T_max=num_training_steps,
+        eta_min=learning_rate * 0.01
+    )
+
+    model.to(device=accelerator.device)
+
+    model, optimizer, dataloader, scheduler = accelerator.prepare(
+        model, optimizer, dataloader, scheduler
+    )
+
+
+
+    initialize_deepspeed_gradient_checkpointing(accelerator)
+    for epoch_id in range(num_epochs):
+        for data in tqdm(dataloader):
+            with accelerator.accumulate(model):
+                if dataset.load_from_cache:
+                    loss = model({}, inputs=data)
+                else:
+                    loss = model(data)
+                accelerator.backward(loss)
+
+                # Debug: print parameters that received no gradients.
+                if accelerator.is_main_process and not getattr(launch_training_task, "_debug_printed", False):
+                    unwrapped = accelerator.unwrap_model(model)
+                    no_grad_params = []
+                    has_grad_params = []
+                    for name, p in unwrapped.named_parameters():
+                        if p.requires_grad:
+                            if p.grad is None:
+                                no_grad_params.append(name)
+                            else:
+                                has_grad_params.append(name)
+                    print(f"\n========== Gradient Check ==========")
+                    print(f"Total trainable params: {len(no_grad_params) + len(has_grad_params)}")
+                    print(f"Params WITH grad:    {len(has_grad_params)}")
+                    print(f"Params WITHOUT grad: {len(no_grad_params)}")
+                    print(f"\n--- Params WITHOUT grad (first 100) ---")
+                    for n in no_grad_params[:100]:
+                        print(f"  {n}")
+                    if len(no_grad_params) > 100:
+                        print(f"  ... and {len(no_grad_params) - 100} more")
+                    print(f"====================================\n")
+                    launch_training_task._debug_printed = True
+                # === END DEBUG ===
+
+
+                optimizer.step()
+                scheduler.step()
+                optimizer.zero_grad()
+                model_logger.on_step_end(accelerator, model, save_steps, loss=loss)
+        if save_steps is None:
+            model_logger.on_epoch_end(accelerator, model, epoch_id)
+    model_logger.on_training_end(accelerator, model, save_steps)
+
+
+def launch_data_process_task(
+    accelerator: Accelerator,
+    dataset: torch.utils.data.Dataset,
+    model: DiffusionTrainingModule,
+    model_logger: ModelLogger,
+    num_workers: int = 8,
+    args = None,
+):
+    if args is not None:
+        num_workers = args.dataset_num_workers
+        
+    dataloader = torch.utils.data.DataLoader(dataset, shuffle=False, collate_fn=lambda x: x[0], num_workers=num_workers)
+    model.to(device=accelerator.device)
+    model, dataloader = accelerator.prepare(model, dataloader)
+    
+    for data_id, data in enumerate(tqdm(dataloader)):
+        with accelerator.accumulate(model):
+            with torch.no_grad():
+                folder = os.path.join(model_logger.output_path, str(accelerator.process_index))
+                os.makedirs(folder, exist_ok=True)
+                save_path = os.path.join(model_logger.output_path, str(accelerator.process_index), f"{data_id}.pth")
+                data = model(data)
+                torch.save(data, save_path)
+
+
+def initialize_deepspeed_gradient_checkpointing(accelerator: Accelerator):
+    if getattr(accelerator.state, "deepspeed_plugin", None) is not None:
+        ds_config = accelerator.state.deepspeed_plugin.deepspeed_config
+        if "activation_checkpointing" in ds_config:
+            import deepspeed
+            act_config = ds_config["activation_checkpointing"]
+            deepspeed.checkpointing.configure(
+                mpu_=None, 
+                partition_activations=act_config.get("partition_activations", False),
+                checkpoint_in_cpu=act_config.get("cpu_checkpointing", False),
+                contiguous_checkpointing=act_config.get("contiguous_memory_optimization", False)
+            )
+        else:
+            print("Do not find activation_checkpointing config in deepspeed config, skip initializing deepspeed gradient checkpointing.")

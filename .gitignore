@@ -1,0 +1,54 @@
+# Local runtime assets and provenance.
+/models/
+/results/
+/logs/
+/cache/
+/manifests/
+/environments/*.json
+/tools/assemble.py
+/assets/*
+
+# Model weights, generated media, and arrays at any depth.
+*.safetensors
+*.ckpt
+*.pt
+*.pth
+*.bin
+*.onnx
+*.mp4
+*.mov
+*.avi
+*.webm
+*.npz
+*.npy
+*.partial
+
+# Python and build artifacts.
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Local credentials and editor state.
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+.netrc
+.codebuddy/
+.vscode/
+.idea/
+.DS_Store
+*.log
+*.swp
+*~
